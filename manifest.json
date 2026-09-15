@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "dante.convert",
+  "name": "Convert",
+  "version": "0.1.0",
+  "author": "Dante Regis",
+  "license": "MIT",
+  "description": "Type a conversion, get the answer. Currencies with live rates, plus length, mass, volume, temperature, speed, area, data and time.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Convert",
+    "description": "A single input box: \"100 EUR in BRL\", \"10 km to mi\", \"72 F\". Enter copies the result.",
+    "category": "Utilities",
+    "aliases": ["converter", "currency", "units", "exchange"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "defaultCurrency": "USD",
+      "secondaryCurrency": "EUR",
+      "copyOnEnter": true,
+      "closeOnEnter": true
+    },
+    "schema": [
+      { "key": "defaultCurrency", "type": "string", "label": "Default target currency", "defaultValue": "USD", "description": "ISO code used when you type an amount and a currency but no target, e.g. \"100 EUR\"." },
+      { "key": "secondaryCurrency", "type": "string", "label": "Secondary target currency", "defaultValue": "EUR", "description": "Used instead when the source already is the default target currency." },
+      { "key": "copyOnEnter", "type": "boolean", "label": "Copy result on Enter", "defaultValue": true },
+      { "key": "closeOnEnter", "type": "boolean", "label": "Close panel on Enter", "defaultValue": true }
+    ]
+  }
+}
