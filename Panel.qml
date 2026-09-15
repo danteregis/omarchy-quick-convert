@@ -13,8 +13,8 @@ import "Model.js" as Model
 // entry in shell.json.
 Panel {
   id: root
-  moduleName: "dante.convert"
-  ipcTarget: "dante.convert"
+  moduleName: "danteregis.convert"
+  ipcTarget: "danteregis.convert"
   manageIpc: false
 
   property var anchorItem: null
@@ -897,7 +897,7 @@ Panel {
               width: parent.width - copyBindButton.width - parent.spacing
               anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
-              text: 'o.bind("SUPER + U", "Convert", "omarchy-shell shell toggle dante.convert")'
+              text: 'o.bind("SUPER + U", "Convert", "omarchy-shell shell toggle danteregis.convert")'
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
