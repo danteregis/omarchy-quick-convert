@@ -7,7 +7,7 @@ const vm = require("vm")
 const src = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8").replace(/^\.pragma library\s*/m, "")
 const ctx = {}
 vm.createContext(ctx)
-vm.runInContext(src + "\n;this.M = { evaluate, formatValue, formatAmount, rateLine, parseAmount, parseRatesPayload, unitLabel, EXAMPLES, separatorsFor, currencyOptions, isCurrencyCode }", ctx)
+vm.runInContext(src + "\n;this.M = { evaluate, formatValue, formatAmount, rateLine, exprLine, resultCategory, parseAmount, parseRatesPayload, unitLabel, EXAMPLES, separatorsFor, currencyOptions, isCurrencyCode }", ctx)
 const M = ctx.M
 
 const rates = { USD: 1, EUR: 0.865688, BRL: 5.146298, JPY: 147.2, GBP: 0.74, INR: 88.1, MXN: 18.4 }
@@ -86,6 +86,48 @@ eq(M.evaluate("100 eur to", env).trailing, true, "trailing connector still conve
 eq(M.evaluate("100 xyz", env).error, "Unknown unit “xyz”", "unknown unit")
 eq(M.evaluate("100 eur to xyz", env).error, "Unknown unit “xyz”", "unknown target")
 eq(M.evaluate("100 eur brl", { rates: {} }).ratesMissing, true, "no rates flagged")
+
+// Arithmetic
+function calc(text, extra) {
+  const r = M.evaluate(text, Object.assign({}, env, extra || {}))
+  if (!r || r.error || r.pending) return r
+  return r.to ? { value: r.value, to: M.unitLabel(r.to), expr: r.expr } : { value: r.value, expr: r.expr }
+}
+eq(calc("1 + 3"), { value: 4, expr: "1 + 3" }, "addition")
+eq(calc("3*14"), { value: 42, expr: "3 × 14" }, "multiplication, no spaces")
+eq(calc("3^6"), { value: 729, expr: "3 ^ 6" }, "power")
+eq(calc("2**10").value, 1024, "** power")
+eq(calc("2^3^2").value, 512, "power is right-associative")
+eq(calc("10 - 2 * 3").value, 4, "precedence")
+eq(calc("(1 + 2) / 4"), { value: 0.75, expr: "(1 + 2) ÷ 4" }, "parens and division")
+eq(calc("-(2+3)"), { value: -5, expr: "-(2 + 3)" }, "unary minus on group")
+eq(calc("2(3+4)"), { value: 14, expr: "2(3 + 4)" }, "implicit multiplication")
+eq(calc("3 x 4").value, 12, "x multiplies")
+eq(calc("1,5 + 2,5").value, 4, "decimal comma operands")
+eq(calc("1,000 + 1").value, 1001, "grouped operand")
+eq(calc("1 + 3 =").value, 4, "trailing = ignored")
+eq(calc("1 +"), { value: 1, expr: "1 +" }, "dangling operator keeps running value")
+eq(calc("(54 * 12"), { value: 648, expr: "(54 × 12" }, "unclosed paren while typing")
+eq(M.evaluate("(", env).pending, true, "lone paren is pending")
+eq(M.evaluate("1/0", env).error, "Division by zero", "division by zero")
+eq(M.evaluate("1 + abc", env).error, "Unknown unit “abc”", "unknown unit after maths")
+close(calc("(54 * 12) BRL in USD").value, 648 / rates.BRL, "expression then currency")
+eq(calc("(54 * 12) BRL in USD").expr, "(54 × 12)", "expression kept for display")
+close(calc("2 * 3 kg in lb").value, 13.2277357, "expression then unit")
+close(calc("$10*2 in eur").value, 20 * rates.EUR, "symbol before expression")
+close(calc("r$(2+3) usd").value, 5 / rates.BRL, "r$ before parens")
+eq(calc("3 x 4 km").to, "mi", "x with unit")
+eq(calc("10 km to mi").expr, "", "no expression on a plain conversion")
+eq(M.evaluate("-40 c to f", env).expr, "", "leading minus is a sign, not maths")
+eq(M.evaluate("100", env).pending, true, "bare number still pending")
+eq(M.exprLine(M.evaluate("(54 * 12) brl usd", env)), "(54 × 12) = 648", "expr line")
+eq(M.exprLine(M.evaluate("1 + 3", env)), "", "no expr line for plain maths")
+eq(M.resultCategory(M.evaluate("1 + 3", env)), "math", "math category")
+eq(M.formatValue(1 / 3, "math"), "0.333333333333", "math keeps 12 significant digits")
+eq(M.formatValue(1099511627776, "math"), "1,099,511,627,776", "big math integer grouped")
+eq(M.formatValue(42, "math"), "42", "math integer")
+eq(M.evaluate("2 + 2", Object.assign({}, env, { separators: { decimal: ",", group: "." } })).expr, "2 + 2", "expr uses separators")
+eq(M.evaluate("1,5 + 1", Object.assign({}, env, { decimal: ",", separators: { decimal: ",", group: "." } })).expr, "1,5 + 1", "expr keeps comma decimal")
 
 // Formatting
 eq(M.formatValue(594.4805, "currency"), "594.48", "money 2dp")

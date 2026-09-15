@@ -1,15 +1,20 @@
 # Convert — Omarchy bar widget
 
-Type a conversion, get the answer. One input box, result updates as you type,
-Enter copies it to the clipboard.
+Type a conversion or a sum, get the answer. One input box, result updates as
+you type, Enter copies it to the clipboard.
 
-![Convert panel](preview.png)
+![100 EUR in BRL](docs/convert.png)
 
 ```
 100 EUR in BRL        $250 to JPY         100 euros in reais
 10 km to mi           72 F                80 kg
 1 GiB in MB           3 cups in ml        120 km/h in mph
+3 * 14                2^10                (54 * 12) BRL in USD
 ```
+
+| Expression as the amount | Plain arithmetic |
+|---|---|
+| ![(54 * 12) BRL in USD](docs/math-convert.png) | ![3^6 + 1](docs/math.png) |
 
 ## Install
 
@@ -42,6 +47,29 @@ exchange rates.
 Ambiguous words resolve by context: `100 pounds to usd` is GBP, `100 pounds to
 kg` is lb.
 
+## Arithmetic
+
+The amount can be an expression:
+
+```
+1 + 3                 3*14                3^6
+(1 + 2) / 4           2(3+4)              -(2 + 3)
+2**10                 3 x 4               1,5 + 2,5
+(54 * 12) BRL in USD  2 * 3 kg in lb      $10*2 in eur
+```
+
+Operators are `+ - * / ^` (also `×`, `÷`, `x`, `**`), with the usual
+precedence, right-associative `^`, and parentheses. Numbers follow your
+number format, so a comma-decimal user can write `1,5 + 2,5`.
+
+Anything after the expression is read as units: `(54 * 12) BRL in USD`,
+`2 * 3 kg in lb`, `$10*2 in eur`. A plain expression shows just the number;
+Enter copies it like any other result. While typing, `1 +` shows the running
+value and `(` waits for more.
+
+A lone number is not an expression, so `-40 c` still means minus forty
+degrees.
+
 ## Keys
 
 | Key | Action |
@@ -71,6 +99,8 @@ every rate again before use.
 Click the gear in the panel (or press Ctrl+, in the input) for the settings
 page. Changes are written to the widget's entry in `~/.config/omarchy/shell.json`
 and apply immediately; you can also edit that file by hand.
+
+![Settings page](docs/settings.png)
 
 | Key | Default | Meaning |
 |---|---|---|

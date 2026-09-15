@@ -3,8 +3,10 @@
 // Conversion engine for the Convert panel. Pure functions, no Qt access, so
 // it can be unit-tested with plain node (see tests/model-test.js).
 //
-// evaluate(text, ctx) turns a line like "100 EUR in BRL", "10 km to mi" or
-// "72f" into { amount, from, to, value, rate, error, pending }.
+// evaluate(text, ctx) turns a line like "100 EUR in BRL", "10 km to mi",
+// "72f", "3 * 14" or "(54 * 12) BRL in USD" into
+// { amount, from, to, value, rate, expr, error, pending }. Plain arithmetic
+// has from/to null and value === amount.
 
 // ---------------------------------------------------------------------------
 // Unit tables. `factor` converts to the category's base unit (metre, kilogram,
@@ -298,6 +300,172 @@ function splitNumberWord(word) {
 }
 
 // ---------------------------------------------------------------------------
+// Arithmetic. "1 + 3", "3*14", "3^6", "(54 * 12) brl in usd". A leading
+// expression is evaluated and its value becomes the amount; whatever follows
+// is parsed as units. A lone number is not an expression, so "10 km" and
+// "-40 c" keep their old meaning.
+// ---------------------------------------------------------------------------
+
+var OPERATORS = { "+": "+", "-": "-", "*": "*", "×": "*", "/": "/", "÷": "/", "^": "^", "(": "(", ")": ")" }
+
+// Tokenise the longest run of maths at the start of `s`. Each token records
+// where it ends so the caller can find the text that follows.
+function tokenizeMath(s, start, decimal) {
+  var tokens = []
+  var i = start
+  while (i < s.length) {
+    var ch = s.charAt(i)
+    if (ch === " ") { i++; continue }
+    var m = s.substr(i).match(/^(?:\d[\d.,]*|\.\d+)/)
+    if (m) {
+      var num = m[0]
+      // A trailing separator belongs to what follows ("100." while typing).
+      while (num.length > 1 && /[.,]$/.test(num)) num = num.substr(0, num.length - 1)
+      var value = parseAmount(num, decimal)
+      if (isNaN(value)) break
+      i += num.length
+      tokens.push({ type: "num", value: value, text: num, end: i })
+      continue
+    }
+    if (s.substr(i, 2) === "**") { i += 2; tokens.push({ type: "op", op: "^", end: i }); continue }
+    if (OPERATORS[ch]) { i++; tokens.push({ type: "op", op: OPERATORS[ch], end: i }); continue }
+    // "x" between numbers multiplies; "xyz" is a word.
+    if (ch === "x" && tokens.length > 0 && !/[a-z]/.test(s.charAt(i + 1))) {
+      var prev = tokens[tokens.length - 1]
+      if (prev.type === "num" || prev.op === ")") { i++; tokens.push({ type: "op", op: "*", end: i }); continue }
+    }
+    break
+  }
+  return tokens
+}
+
+// Recursive descent over the token list. Parses as far as it can and stops
+// before anything it cannot use, so "1 +" evaluates to 1 while typing.
+// Returns { value, end, compound } or null when nothing parsed.
+function parseMath(tokens) {
+  var pos = 0
+  var compound = false
+  function peek() { return tokens[pos] }
+  function isOp(op) { var t = peek(); return !!t && t.type === "op" && t.op === op }
+
+  function primary() {
+    var t = peek()
+    if (!t) return null
+    if (t.type === "num") { pos++; return t.value }
+    if (t.op === "(") {
+      var save = pos
+      pos++
+      var v = additive()
+      if (v === null) { pos = save; return null }
+      if (isOp(")")) pos++          // an unclosed paren is fine while typing
+      compound = true
+      return v
+    }
+    return null
+  }
+  function unary() {
+    if (isOp("-") || isOp("+")) {
+      var save = pos
+      var neg = peek().op === "-"
+      pos++
+      var v = unary()
+      if (v === null) { pos = save; return null }
+      return neg ? -v : v
+    }
+    return primary()
+  }
+  function power() {
+    var base = unary()
+    if (base === null) return null
+    if (isOp("^")) {
+      var save = pos
+      pos++
+      var exp = power()               // right-associative
+      if (exp === null) { pos = save; return base }
+      compound = true
+      return Math.pow(base, exp)
+    }
+    return base
+  }
+  function multiplicative() {
+    var v = power()
+    if (v === null) return null
+    for (;;) {
+      var save = pos
+      var t = peek()
+      if (!t || t.type !== "op") break
+      var op = t.op
+      if (op === "(") op = "*"         // 2(3+4)
+      else if (op === "*" || op === "/") pos++
+      else break
+      var rhs = power()
+      if (rhs === null) { pos = save; break }
+      compound = true
+      v = op === "*" ? v * rhs : v / rhs
+    }
+    return v
+  }
+  function additive() {
+    var v = multiplicative()
+    if (v === null) return null
+    for (;;) {
+      var save = pos
+      if (!(isOp("+") || isOp("-"))) break
+      var add = peek().op === "+"
+      pos++
+      var rhs = multiplicative()
+      if (rhs === null) { pos = save; break }
+      compound = true
+      v = add ? v + rhs : v - rhs
+    }
+    return v
+  }
+
+  var value = additive()
+  if (value === null || pos === 0) return null
+  return { value: value, end: tokens[pos - 1].end, compound: compound }
+}
+
+// Human form of the consumed expression: "54 × 12", "3 ^ 6", "(1 + 2) ÷ 4".
+function prettyMath(tokens, end, sep) {
+  var out = ""
+  var prev = null            // previous token
+  var prevUnary = false      // previous token was a sign, not a subtraction
+  for (var i = 0; i < tokens.length && tokens[i].end <= end; i++) {
+    var t = tokens[i]
+    var text = t.type === "num" ? formatAmount(t.value, sep) : ({ "*": "×", "/": "÷" }[t.op] || t.op)
+    var afterOperand = prev && (prev.type === "num" || prev.op === ")")
+    var unary = t.type === "op" && (t.op === "-" || t.op === "+") && !afterOperand
+    var glue = !prev || prevUnary || (prev.op === "(") || t.op === ")" || (t.op === "(" && prev.type === "num")
+    out += (glue ? "" : " ") + text
+    prev = t
+    prevUnary = unary
+  }
+  return out
+}
+
+// Evaluate arithmetic at the start of `s` (after `start`). Returns null when
+// there is no genuine expression there (a bare number does not count).
+function leadingMath(s, start, decimal) {
+  var tokens = tokenizeMath(s, start, decimal)
+  if (tokens.length < 2) return null
+  var parsed = parseMath(tokens)
+  if (!parsed) return null
+  // Operators left over after the parse ("1 +", "2 *") are a half-typed
+  // expression: keep the running value and skip past them.
+  var end = parsed.end
+  var dangling = false
+  for (var i = 0; i < tokens.length; i++) {
+    if (tokens[i].end <= parsed.end) continue
+    if (tokens[i].type !== "op") break
+    end = tokens[i].end
+    dangling = true
+  }
+  if (!parsed.compound && !dangling) return null
+  return { value: parsed.value, end: end, tokens: tokens }
+}
+
+// ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
 
@@ -345,16 +513,35 @@ function splitUnits(words) {
 }
 
 // ctx: { rates: { CODE: perUsd }, defaultCurrency: "USD", secondaryCurrency: "EUR",
-//        unitSystem: "metric" | "imperial", decimal: "." | "," }
+//        unitSystem: "metric" | "imperial", decimal: "." | ",",
+//        separators: { decimal, group } (only used to pretty-print expressions) }
 function evaluate(text, ctx) {
   ctx = ctx || {}
   var s = normalise(text)
   if (s === "") return null
 
-  var words = s.split(" ")
+  // Optional currency symbol before the maths: "$(2 + 3) in eur", "r$10*2".
+  var symbol = ""
+  var symbolMatch = s.match(/^(r\$|us\$|au\$|a\$|ca\$|c\$|hk\$|nz\$|s\$|mx\$|[^a-z0-9\s.,+\-(]+)\s*(?=[-+(\d.])/)
+  if (symbolMatch && CURRENCY_ALIASES[symbolMatch[1]]) symbol = symbolMatch[1]
+
+  var math = leadingMath(s, symbol.length, ctx.decimal)
   var amount = 1
   var hasAmount = false
   var unitWords = []
+  var words
+  if (math) {
+    if (!isFinite(math.value)) return { error: "Division by zero", amount: NaN }
+    amount = math.value
+    hasAmount = true
+    if (symbol) unitWords.push(symbol)
+    words = s.substr(math.end).trim().split(" ").filter(function(w) { return w !== "" })
+    // "1 + 3" alone (or "1 + 3 =", which normalises to a trailing "to"): plain maths.
+    if (unitWords.length === 0 && (words.length === 0 || (words.length === 1 && CONNECTORS[words[0]])))
+      return { amount: amount, value: amount, from: null, to: null, math: math, expr: prettyMath(math.tokens, math.end, ctx.separators) }
+  } else {
+    words = s.split(" ")
+  }
   for (var i = 0; i < words.length; i++) {
     var w = words[i]
     if (!hasAmount) {
@@ -378,6 +565,8 @@ function evaluate(text, ctx) {
 
   var split = splitUnits(unitWords)
   if (!split.from) {
+    // Only maths characters so far ("(", "2 +("): still typing an expression.
+    if (/^[\d\s.,+\-*\/^()×÷x]*$/.test(split.unknown)) return { pending: true, amount: amount, hint: "…" }
     return { error: "Unknown unit “" + split.unknown + "”", amount: amount }
   }
 
@@ -400,7 +589,8 @@ function evaluate(text, ctx) {
     value: res.value,
     rate: res.rate,
     defaulted: defaulted,
-    trailing: split.trailing === true
+    trailing: split.trailing === true,
+    expr: math ? prettyMath(math.tokens, math.end, ctx.separators) : ""
   }
 }
 
@@ -502,9 +692,18 @@ function formatValue(n, cat, sep) {
     return formatFixed(n, Math.min(8, decimalsForPrecision(n, 4)), false, sep)
   }
   if (abs === 0) return "0"
+  if (cat === "math") {
+    if (abs >= 1e18) return n.toExponential(6)
+    return formatFixed(n, Math.min(12, decimalsForPrecision(n, 12)), false, sep)
+  }
   if (abs >= 1e15) return n.toExponential(4)
   if (abs >= 1000) return formatFixed(n, 2, false, sep)
   return formatFixed(n, Math.min(10, decimalsForPrecision(n, 6)), false, sep)
+}
+
+// Category used to format a result's value: the target unit's, or "math".
+function resultCategory(result) {
+  return result && result.to ? result.to.cat : "math"
 }
 
 function formatAmount(n, sep) {
@@ -521,6 +720,12 @@ function formatRate(rate, cat, sep) {
 function rateLine(result, sep) {
   if (!result || result.rate === null || result.rate === undefined) return ""
   return "1 " + unitLabel(result.from) + " = " + formatRate(result.rate, result.from.cat, sep) + " " + unitLabel(result.to)
+}
+
+// "54 × 12 = 648" for a converted expression; empty otherwise.
+function exprLine(result, sep) {
+  if (!result || !result.expr || !result.to) return ""
+  return result.expr + " = " + formatAmount(result.amount, sep)
 }
 
 function relativeAge(fromUnixSeconds, nowUnixSeconds) {
@@ -555,7 +760,7 @@ function parseRatesPayload(raw, maxBytes) {
 }
 
 var EXAMPLES = [
-  "100 EUR in BRL", "$250 to JPY", "10 km to mi", "72 F", "1 GiB in MB", "3 cups in ml", "120 km/h in mph"
+  "100 EUR in BRL", "$250 to JPY", "10 km to mi", "3 * 14", "72 F", "(54 * 12) BRL in USD", "2^10", "1 GiB in MB", "3 cups in ml", "120 km/h in mph"
 ]
 
 // ---------------------------------------------------------------------------

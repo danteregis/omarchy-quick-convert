@@ -157,22 +157,27 @@ Panel {
   property string flash: ""
 
   readonly property bool hasValue: !!result && result.value !== undefined
-  readonly property string valueText: hasValue ? Model.formatValue(result.value, result.to.cat, separators) : ""
+  readonly property string valueText: hasValue ? Model.formatValue(result.value, Model.resultCategory(result), separators) : ""
   readonly property string valueUnit: hasValue ? Model.unitLabel(result.to) : ""
-  readonly property string sourceText: hasValue ? Model.formatAmount(result.amount, separators) + " " + Model.unitLabel(result.from) + " =" : ""
+  readonly property string sourceText: !hasValue ? ""
+    : !result.to ? result.expr + " ="
+    : Model.formatAmount(result.amount, separators) + " " + Model.unitLabel(result.from) + " ="
   readonly property string detailText: {
     if (!result) return ""
     if (result.error) return result.ratesMissing && !hasRates ? (ratesLoading ? "Waiting for exchange rates…" : "No exchange rates available offline") : result.error
     if (result.pending) return result.from ? (Model.unitName(result.from) + " — " + result.hint) : ""
+    if (!result.to) return ""   // plain arithmetic
+    var parts = []
+    var expr = Model.exprLine(result, separators)
+    if (expr !== "") parts.push(expr)
     var line = Model.rateLine(result, separators)
-    if (result.from.cat === "currency" || result.to.cat === "currency") {
-      var names = Model.unitName(result.from) + " → " + Model.unitName(result.to)
-      return line !== "" ? line + "  ·  " + names : names
-    }
-    return line
+    if (line !== "") parts.push(line)
+    if (result.from.cat === "currency" || result.to.cat === "currency")
+      parts.push(Model.unitName(result.from) + " → " + Model.unitName(result.to))
+    return parts.join("  ·  ")
   }
   readonly property bool showIdleHint: result === null || (result.pending === true && !result.from)
-  readonly property string copyText: hasValue ? Model.formatValue(result.value, result.to.cat, { decimal: ".", group: "" }) : ""
+  readonly property string copyText: hasValue ? Model.formatValue(result.value, Model.resultCategory(result), { decimal: ".", group: "" }) : ""
 
   function recompute() {
     result = Model.evaluate(query, {
@@ -180,7 +185,8 @@ Panel {
       defaultCurrency: defaultCurrency,
       secondaryCurrency: secondaryCurrency,
       unitSystem: unitSystem,
-      decimal: separators.decimal
+      decimal: separators.decimal,
+      separators: separators
     })
   }
 
@@ -200,7 +206,7 @@ Panel {
     if (copyOnEnter) {
       copyProc.command = ["wl-copy", "--", copyText]
       copyProc.running = true
-      flash = "copied " + valueText + " " + valueUnit
+      flash = ("copied " + valueText + " " + valueUnit).trim()
       flashTimer.restart()
     }
     if (closeOnEnter) close()
@@ -517,6 +523,7 @@ Panel {
           textFormat: Text.PlainText
           text: root.result === null
             ? "Try  " + Model.EXAMPLES.slice(0, 4).join("   ·   ")
+            : root.result.hint === "…" ? "Keep typing…"
             : "Add a unit or currency, e.g. “" + Model.formatAmount(root.result.amount, root.separators) + " EUR in " + root.defaultCurrency + "”"
           color: root.faint
           font.family: root.fontFamily

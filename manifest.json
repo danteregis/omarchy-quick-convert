@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "danteregis.convert",
   "name": "Convert",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Dante Regis",
   "license": "MIT",
-  "description": "Type a conversion, get the answer. Currencies with live rates, plus length, mass, volume, temperature, speed, area, data and time.",
+  "description": "Type a conversion or a sum, get the answer. Currencies with live rates, length, mass, volume, temperature, speed, area, data, time, and plain arithmetic.",
   "kinds": [
     "bar-widget"
   ],
@@ -15,13 +15,15 @@
   },
   "barWidget": {
     "displayName": "Convert",
-    "description": "A single input box: \"100 EUR in BRL\", \"10 km to mi\", \"72 F\". Enter copies the result.",
+    "description": "A single input box: \"100 EUR in BRL\", \"10 km to mi\", \"3 * 14\", \"(54 * 12) BRL in USD\". Enter copies the result.",
     "category": "Utilities",
     "aliases": [
       "converter",
       "currency",
       "units",
-      "exchange"
+      "exchange",
+      "calculator",
+      "calc"
     ],
     "allowMultiple": false,
     "defaultSection": "right",
