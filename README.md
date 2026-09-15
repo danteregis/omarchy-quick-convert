@@ -95,8 +95,10 @@ dependencies, so it is tested with plain node:
 node tests/model-test.js
 ```
 
-Saving any file under `~/.config/omarchy/plugins/dante.convert/` hot-reloads
-the plugin. Shell logs: `qs log --pid $(pgrep -f 'quickshell -n -p') -t 100`.
+Saving `BarWidget.qml` or `manifest.json` hot-reloads the plugin. Edits to
+`Panel.qml` and `Model.js` are loaded through a `Loader` and stay cached by
+the QML engine, so apply them with `omarchy restart shell`. Shell logs:
+`qs log --pid $(pgrep -f 'quickshell -n -p') -t 100`.
 
 ## Requirements
 
