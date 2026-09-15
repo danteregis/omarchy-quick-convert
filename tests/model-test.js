@@ -7,7 +7,7 @@ const vm = require("vm")
 const src = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8").replace(/^\.pragma library\s*/m, "")
 const ctx = {}
 vm.createContext(ctx)
-vm.runInContext(src + "\n;this.M = { evaluate, formatValue, formatAmount, rateLine, parseAmount, parseRatesPayload, unitLabel, EXAMPLES }", ctx)
+vm.runInContext(src + "\n;this.M = { evaluate, formatValue, formatAmount, rateLine, parseAmount, parseRatesPayload, unitLabel, EXAMPLES, separatorsFor, currencyOptions, isCurrencyCode }", ctx)
 const M = ctx.M
 
 const rates = { USD: 1, EUR: 0.865688, BRL: 5.146298, JPY: 147.2, GBP: 0.74, INR: 88.1, MXN: 18.4 }
@@ -101,6 +101,26 @@ eq(M.formatAmount(1000.5), "1,000.5", "amount frac")
 eq(M.rateLine(M.evaluate("100 eur brl", env)), "1 EUR = 5.9447 BRL", "rate line")
 eq(M.rateLine(M.evaluate("72 f", env)), "", "no rate line for temperature")
 eq(M.parseAmount("1 000"), 1000, "space grouping")
+
+// Unit system + number format settings
+eq(shape("10 nmi").to, "km", "nmi defaults to km (metric default)")
+eq(shape("10 nmi", { unitSystem: "imperial" }).to, "mi", "nmi defaults to mi for imperial")
+eq(shape("20 kn", { unitSystem: "imperial" }).to, "mph", "knots to mph for imperial")
+eq(shape("20 kn", { unitSystem: "metric" }).to, "km/h", "knots to km/h for metric")
+eq(shape("300 K", { unitSystem: "imperial" }).to, "°F", "kelvin to F for imperial")
+eq(shape("10 km", { unitSystem: "imperial" }).to, "mi", "cross-system pairs unchanged")
+eq(shape("10 mi", { unitSystem: "imperial" }).to, "km", "mi still goes to km for imperial")
+close(conv("1.000 usd eur", { decimal: "," }).value, 1000 * rates.EUR, "comma-decimal user: 1.000 is a thousand")
+close(conv("1.000 usd eur", { decimal: "." }).value, 1 * rates.EUR, "dot-decimal user: 1.000 is one")
+close(conv("1,000 usd eur", { decimal: "," }).value, 1 * rates.EUR, "comma-decimal user: 1,000 is one")
+eq(M.separatorsFor("comma"), { decimal: ",", group: "." }, "separators comma")
+eq(M.separatorsFor("plain"), { decimal: ".", group: "" }, "separators plain")
+eq(M.separatorsFor("auto", { decimal: ",", group: "," }), { decimal: ",", group: " " }, "auto never repeats a separator")
+eq(M.separatorsFor("auto", { decimal: ".", group: "," }), { decimal: ".", group: "," }, "auto passes locale through")
+eq(M.formatValue(1234.5, "length", M.separatorsFor("plain")), "1234.5", "plain format")
+eq(M.currencyOptions(true)[0].value, "auto", "currency options lead with auto")
+eq(M.currencyOptions(false).length, 166, "one option per supported currency")
+eq(M.isCurrencyCode("BRL") && !M.isCurrencyCode("XXX"), true, "isCurrencyCode")
 
 // Rates payload validation
 const many = {}; for (let i = 0; i < 30; i++) many["A" + String.fromCharCode(65 + i % 26) + String.fromCharCode(65 + Math.floor(i / 26))] = 1 + i

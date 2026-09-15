@@ -99,15 +99,25 @@ var UNITS = [
 ]
 
 // What to convert into when the user gives no target ("10 km", "72 f").
-var DEFAULT_PARTNER = {
-  mm: "in", cm: "in", m: "ft", km: "mi", "µm": "mm", nm: "µm", in: "cm", ft: "m", yd: "m", mi: "km", nmi: "km",
-  mg: "g", g: "oz", kg: "lb", t: "lb", oz: "g", lb: "kg", st: "kg",
-  ml: "fl oz", cl: "fl oz", l: "gal", "m³": "l", gal: "l", qt: "l", pt: "ml", cup: "ml", "fl oz": "ml", tbsp: "ml", tsp: "ml",
-  "°C": "°F", "°F": "°C", K: "°C",
-  "m/s": "km/h", "km/h": "mph", mph: "km/h", kn: "km/h", "ft/s": "m/s",
+// Cross-system pairs are the same for everyone; units that belong to neither
+// system (nautical miles, knots, kelvin, tonnes, data, time) follow the
+// user's unit system: a metric user gets km, an imperial user gets miles.
+var PARTNER_COMMON = {
+  mm: "in", cm: "in", m: "ft", km: "mi", "µm": "mm", nm: "µm", in: "cm", ft: "m", yd: "m", mi: "km",
+  mg: "g", g: "oz", kg: "lb", oz: "g", lb: "kg",
+  ml: "fl oz", cl: "fl oz", l: "gal", gal: "l", qt: "l", pt: "ml", cup: "ml", "fl oz": "ml", tbsp: "ml", tsp: "ml",
+  "°C": "°F", "°F": "°C",
+  "km/h": "mph", mph: "km/h",
   "m²": "ft²", "km²": "mi²", "cm²": "in²", "ft²": "m²", "in²": "cm²", "yd²": "m²", "mi²": "km²", ha: "acre", acre: "ha",
   bit: "B", B: "bit", kB: "KiB", MB: "MiB", GB: "GiB", TB: "TiB", PB: "TB", KiB: "kB", MiB: "MB", GiB: "GB", TiB: "TB", kbit: "kB", Mbit: "MB", Gbit: "GB",
   ms: "s", s: "ms", min: "s", h: "min", d: "h", wk: "d", mo: "d", yr: "d"
+}
+var PARTNER_METRIC = { nmi: "km", kn: "km/h", K: "°C", t: "kg", st: "kg", "m³": "l", "m/s": "km/h", "ft/s": "m/s" }
+var PARTNER_IMPERIAL = { nmi: "mi", kn: "mph", K: "°F", t: "lb", st: "lb", "m³": "gal", "m/s": "mph", "ft/s": "mph" }
+
+function defaultPartner(id, unitSystem) {
+  var table = unitSystem === "imperial" ? PARTNER_IMPERIAL : PARTNER_METRIC
+  return table[id] || PARTNER_COMMON[id] || null
 }
 
 // ISO 4217 codes served by open.er-api.com. Lets the parser recognise a
@@ -229,24 +239,28 @@ function pickPair(fromCands, toCands) {
 // Number parsing. Accepts "1000", "1,000.5", "1.000,5", "1 000", ".5", "-40".
 // ---------------------------------------------------------------------------
 
-function parseAmount(raw) {
+// `decimal` is the user's decimal separator ("." or ","). With a "," decimal,
+// "1.000" reads as one thousand; with a "." decimal, "1,000" does.
+function parseAmount(raw, decimal) {
   var s = String(raw || "").replace(/\s+/g, "")
   if (s === "") return NaN
+  var decIsComma = decimal === ","
   var lastDot = s.lastIndexOf("."), lastComma = s.lastIndexOf(",")
   if (lastDot >= 0 && lastComma >= 0) {
     // The later one is the decimal separator; the other is grouping.
     if (lastDot > lastComma) s = s.replace(/,/g, "")
     else s = s.replace(/\./g, "").replace(",", ".")
   } else if (lastComma >= 0) {
-    // A single comma followed by exactly three digits reads as grouping
-    // ("1,000"); anything else is a decimal comma ("1,5", "0,25").
     var parts = s.split(",")
-    if (parts.length === 2 && parts[1].length === 3 && parts[0] !== "" && parts[0] !== "-") s = parts.join("")
-    else if (parts.length > 2) s = parts.join("")
+    if (parts.length > 2) s = parts.join("")
+    // "1,000" is grouping for a "." user; a "," user means one point zero.
+    else if (!decIsComma && parts.length === 2 && parts[1].length === 3 && parts[0] !== "" && parts[0] !== "-") s = parts.join("")
     else s = parts.join(".")
   } else if (lastDot >= 0) {
     var dparts = s.split(".")
     if (dparts.length > 2) s = dparts.join("")
+    // "1.000" is grouping for a "," user; a "." user means one point zero.
+    else if (decIsComma && dparts.length === 2 && dparts[1].length === 3 && dparts[0] !== "" && dparts[0] !== "-") s = dparts.join("")
   }
   if (!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(s)) return NaN
   return parseFloat(s)
@@ -330,7 +344,8 @@ function splitUnits(words) {
   return { from: null, to: null, unknown: body.join(" ") }
 }
 
-// ctx: { rates: { CODE: perUsd }, defaultCurrency: "USD", secondaryCurrency: "EUR" }
+// ctx: { rates: { CODE: perUsd }, defaultCurrency: "USD", secondaryCurrency: "EUR",
+//        unitSystem: "metric" | "imperial", decimal: "." | "," }
 function evaluate(text, ctx) {
   ctx = ctx || {}
   var s = normalise(text)
@@ -345,7 +360,7 @@ function evaluate(text, ctx) {
     if (!hasAmount) {
       var parts = splitNumberWord(w)
       if (parts) {
-        var value = parseAmount(parts.number)
+        var value = parseAmount(parts.number, ctx.decimal)
         if (!isNaN(value)) {
           amount = value
           hasAmount = true
@@ -397,7 +412,7 @@ function defaultTarget(from, ctx) {
     if (!isCurrencyCode(code)) code = from.unit.id === "USD" ? "EUR" : "USD"
     return currencyUnit(code)
   }
-  var partner = DEFAULT_PARTNER[from.unit.id]
+  var partner = defaultPartner(from.unit.id, ctx.unitSystem)
   if (!partner) return null
   for (var i = 0; i < UNITS.length; i++)
     if (UNITS[i].id === partner) return { cat: UNITS[i].cat, unit: UNITS[i] }
@@ -542,3 +557,56 @@ function parseRatesPayload(raw, maxBytes) {
 var EXAMPLES = [
   "100 EUR in BRL", "$250 to JPY", "10 km to mi", "72 F", "1 GiB in MB", "3 cups in ml", "120 km/h in mph"
 ]
+
+// ---------------------------------------------------------------------------
+// Settings helpers
+// ---------------------------------------------------------------------------
+
+var NUMBER_FORMATS = [
+  { value: "auto", label: "System locale" },
+  { value: "point", label: "1,234.56" },
+  { value: "comma", label: "1.234,56" },
+  { value: "space", label: "1 234,56" },
+  { value: "plain", label: "1234.56" }
+]
+
+// Separators for a number format setting; `localeSep` is what Qt reports.
+function separatorsFor(format, localeSep) {
+  switch (String(format || "auto")) {
+    case "point": return { decimal: ".", group: "," }
+    case "comma": return { decimal: ",", group: "." }
+    case "space": return { decimal: ",", group: " " }
+    case "plain": return { decimal: ".", group: "" }
+    default:
+      var dec = (localeSep && localeSep.decimal) || "."
+      var grp = (localeSep && localeSep.group) || ","
+      if (grp === dec) grp = dec === "." ? "," : " "
+      if (grp === "\u00a0" || grp === "\u202f") grp = " "
+      return { decimal: dec, group: grp }
+  }
+}
+
+var UNIT_SYSTEMS = [
+  { value: "auto", label: "System locale" },
+  { value: "metric", label: "Metric", description: "Nautical miles → km, knots → km/h, kelvin → °C" },
+  { value: "imperial", label: "Imperial / US", description: "Nautical miles → miles, knots → mph, kelvin → °F" }
+]
+
+var RATE_REFRESH = [
+  { value: "provider", label: "Provider schedule (daily)" },
+  { value: "6", label: "Every 6 hours" },
+  { value: "12", label: "Every 12 hours" },
+  { value: "24", label: "Every 24 hours" }
+]
+
+// Dropdown options for every supported currency, named ones first.
+function currencyOptions(includeAuto) {
+  var named = [], bare = []
+  for (var i = 0; i < CURRENCY_CODES.length; i++) {
+    var code = CURRENCY_CODES[i]
+    if (CURRENCY_NAMES[code]) named.push({ value: code, label: code + "  " + CURRENCY_NAMES[code] })
+    else bare.push({ value: code, label: code })
+  }
+  var out = includeAuto ? [{ value: "auto", label: "System locale" }] : []
+  return out.concat(named, bare)
+}

@@ -2,11 +2,13 @@
   "schemaVersion": 1,
   "id": "dante.convert",
   "name": "Convert",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Dante Regis",
   "license": "MIT",
   "description": "Type a conversion, get the answer. Currencies with live rates, plus length, mass, volume, temperature, speed, area, data and time.",
-  "kinds": ["bar-widget"],
+  "kinds": [
+    "bar-widget"
+  ],
   "activation": "on-demand",
   "entryPoints": {
     "barWidget": "BarWidget.qml"
@@ -15,20 +17,99 @@
     "displayName": "Convert",
     "description": "A single input box: \"100 EUR in BRL\", \"10 km to mi\", \"72 F\". Enter copies the result.",
     "category": "Utilities",
-    "aliases": ["converter", "currency", "units", "exchange"],
+    "aliases": [
+      "converter",
+      "currency",
+      "units",
+      "exchange"
+    ],
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "defaultCurrency": "USD",
-      "secondaryCurrency": "EUR",
+      "defaultCurrency": "auto",
+      "secondaryCurrency": "USD",
+      "unitSystem": "auto",
+      "numberFormat": "auto",
+      "ratesRefresh": "provider",
+      "historyLength": 20,
       "copyOnEnter": true,
       "closeOnEnter": true
     },
     "schema": [
-      { "key": "defaultCurrency", "type": "string", "label": "Default target currency", "defaultValue": "USD", "description": "ISO code used when you type an amount and a currency but no target, e.g. \"100 EUR\"." },
-      { "key": "secondaryCurrency", "type": "string", "label": "Secondary target currency", "defaultValue": "EUR", "description": "Used instead when the source already is the default target currency." },
-      { "key": "copyOnEnter", "type": "boolean", "label": "Copy result on Enter", "defaultValue": true },
-      { "key": "closeOnEnter", "type": "boolean", "label": "Close panel on Enter", "defaultValue": true }
+      {
+        "key": "defaultCurrency",
+        "type": "string",
+        "label": "Default target currency",
+        "defaultValue": "auto",
+        "description": "ISO code used when you type an amount and a currency but no target, e.g. \"100 EUR\". \"auto\" follows the system locale."
+      },
+      {
+        "key": "secondaryCurrency",
+        "type": "string",
+        "label": "Secondary target currency",
+        "defaultValue": "USD",
+        "description": "Used instead when the source already is the default target currency."
+      },
+      {
+        "key": "unitSystem",
+        "type": "enum",
+        "label": "Unit system",
+        "options": [
+          "auto",
+          "metric",
+          "imperial"
+        ],
+        "defaultValue": "auto",
+        "description": "Decides the partner for units outside both systems: nautical miles go to km or miles, knots to km/h or mph, kelvin to °C or °F."
+      },
+      {
+        "key": "numberFormat",
+        "type": "enum",
+        "label": "Number format",
+        "options": [
+          "auto",
+          "point",
+          "comma",
+          "space",
+          "plain"
+        ],
+        "defaultValue": "auto",
+        "description": "auto = system locale, point = 1,234.56, comma = 1.234,56, space = 1 234,56, plain = 1234.56. Also decides how a lone separator in your input is read."
+      },
+      {
+        "key": "ratesRefresh",
+        "type": "enum",
+        "label": "Exchange-rate refresh",
+        "options": [
+          "provider",
+          "6",
+          "12",
+          "24"
+        ],
+        "defaultValue": "provider",
+        "description": "The provider publishes once a day; \"provider\" refetches right after its announced update time. The hour options re-download at a fixed interval instead."
+      },
+      {
+        "key": "historyLength",
+        "type": "integer",
+        "label": "Query history length",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "defaultValue": 20
+      },
+      {
+        "key": "copyOnEnter",
+        "type": "boolean",
+        "label": "Copy result on Enter",
+        "defaultValue": true
+      },
+      {
+        "key": "closeOnEnter",
+        "type": "boolean",
+        "label": "Close panel on Enter",
+        "defaultValue": true
+      }
     ]
   }
 }

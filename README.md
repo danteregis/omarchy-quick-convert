@@ -49,6 +49,7 @@ kg` is lb.
 | ↑ / ↓ | Recall earlier queries |
 | Tab / Shift+Tab | Jump to the neighbouring bar panel |
 | Ctrl+R | Force a rate refresh |
+| Ctrl+, | Open settings |
 
 ## Exchange rates
 
@@ -65,18 +66,32 @@ every rate again before use.
 
 ## Settings
 
-Set these on the widget's entry in `~/.config/omarchy/shell.json`:
+Click the gear in the panel (or press Ctrl+, in the input) for the settings
+page. Changes are written to the widget's entry in `~/.config/omarchy/shell.json`
+and apply immediately; you can also edit that file by hand.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `defaultCurrency` | `USD` | Target when you type an amount and a currency but no target |
-| `secondaryCurrency` | `EUR` | Used when the source already is the default currency |
+| `defaultCurrency` | `auto` | Target when you type an amount and a currency but no target. `auto` follows the system locale |
+| `secondaryCurrency` | `USD` | Used when the source already is the default currency |
+| `unitSystem` | `auto` | `metric` or `imperial`. Decides the partner for units outside both systems: `10 nmi` gives km or mi, `20 kn` gives km/h or mph, `300 K` gives °C or °F. `auto` follows the system locale |
+| `numberFormat` | `auto` | `point` 1,234.56 · `comma` 1.234,56 · `space` 1 234,56 · `plain` 1234.56. Also decides how a lone separator in your input is read: with a comma decimal, `1.000` is a thousand |
+| `ratesRefresh` | `provider` | `provider` refetches right after the provider's daily update; `6`, `12`, `24` re-download on a fixed interval of hours |
+| `historyLength` | `20` | How many earlier queries Up/Down recall (0 disables) |
 | `copyOnEnter` | `true` | Enter copies the result |
 | `closeOnEnter` | `true` | Enter closes the panel |
 
+`auto` reads Qt's locale, which comes from `LANG`. A machine set to `en_US`
+reports imperial units and USD even when it sits in Brazil, so pin the values
+you want:
+
 ```json
-{ "id": "dante.convert", "defaultCurrency": "BRL", "secondaryCurrency": "USD" }
+{ "id": "dante.convert", "defaultCurrency": "BRL", "secondaryCurrency": "USD", "unitSystem": "metric" }
 ```
+
+The keyboard shortcut is Hyprland's, not the plugin's. The settings page
+shows the current binding and copies the `o.bind` line for
+`~/.config/hypr/bindings.lua`.
 
 ## IPC
 
@@ -84,6 +99,7 @@ Set these on the widget's entry in `~/.config/omarchy/shell.json`:
 omarchy-shell shell toggle dante.convert
 omarchy-shell dante.convert query "100 eur in brl"   # open with a query prefilled
 omarchy-shell dante.convert refresh                   # refetch rates
+omarchy-shell dante.convert settings                  # open on the settings page
 ```
 
 ## Development

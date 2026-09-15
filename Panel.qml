@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -7,7 +8,9 @@ import "Model.js" as Model
 
 // Keyboard-first converter. One text field; the result updates as you type.
 // Enter copies the result (wl-copy) and closes, Escape closes, Up/Down walk
-// through earlier queries, Tab moves to the neighbouring bar panel.
+// through earlier queries, Tab moves to the neighbouring bar panel. The gear
+// flips the card to a settings page whose values persist on this widget's
+// entry in shell.json.
 Panel {
   id: root
   moduleName: "dante.convert"
@@ -29,10 +32,64 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   // ---- settings -----------------------------------------------------------
-  readonly property string defaultCurrency: String(setting("defaultCurrency", "USD")).toUpperCase()
-  readonly property string secondaryCurrency: String(setting("secondaryCurrency", "EUR")).toUpperCase()
+  // "auto" values resolve from Qt's locale. LANG=en_US on a machine in Brazil
+  // would pick imperial and USD, so the settings page lets the user pin them.
+  readonly property var systemLocale: Qt.locale()
+  readonly property string localeCurrency: {
+    var code = String(systemLocale.currencySymbol(Locale.CurrencyIsoCode) || "").toUpperCase()
+    return Model.isCurrencyCode(code) ? code : "USD"
+  }
+  readonly property string localeUnitSystem: systemLocale.measurementSystem === Locale.MetricSystem ? "metric" : "imperial"
+  readonly property var localeSeparators: ({ decimal: systemLocale.decimalPoint, group: systemLocale.groupSeparator })
+
+  readonly property string defaultCurrencySetting: String(setting("defaultCurrency", "auto"))
+  readonly property string defaultCurrency: {
+    var v = defaultCurrencySetting.toUpperCase()
+    return v === "AUTO" || !Model.isCurrencyCode(v) ? localeCurrency : v
+  }
+  readonly property string secondaryCurrencySetting: String(setting("secondaryCurrency", "USD"))
+  readonly property string secondaryCurrency: {
+    var v = secondaryCurrencySetting.toUpperCase()
+    if (v === "AUTO") v = localeCurrency
+    if (!Model.isCurrencyCode(v) || v === defaultCurrency) v = defaultCurrency === "USD" ? "EUR" : "USD"
+    return v
+  }
+  readonly property string unitSystemSetting: String(setting("unitSystem", "auto"))
+  readonly property string unitSystem: unitSystemSetting === "auto" ? localeUnitSystem : unitSystemSetting
+  readonly property string numberFormat: String(setting("numberFormat", "auto"))
+  readonly property var separators: Model.separatorsFor(numberFormat, localeSeparators)
+  readonly property string ratesRefresh: String(setting("ratesRefresh", "provider"))
+  readonly property int historyLength: Math.max(0, Math.min(100, parseInt(setting("historyLength", 20), 10) || 0))
   readonly property bool copyOnEnter: setting("copyOnEnter", true) === true
   readonly property bool closeOnEnter: setting("closeOnEnter", true) === true
+
+  // Settings live on this widget's entry in shell.json; the shell hot-reloads
+  // the file and every bar instance sees the new value. Applied locally first
+  // so the control moves on the click. updateEntryInline replaces the entry
+  // whole, so the current settings are merged in.
+  function persistSettings(values) {
+    var entry = { id: root.moduleName }
+    for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
+    for (var key in values) {
+      if (values[key] === undefined) delete entry[key]
+      else entry[key] = values[key]
+    }
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  property bool settingsOpen: false
+
+  function showSettings(open) {
+    settingsOpen = open === true
+    if (settingsOpen) {
+      hotkeyProc.running = true
+      Qt.callLater(function() { settingsFocus.forceActiveFocus() })
+    } else {
+      focusInput()
+    }
+  }
 
   // ---- exchange rates -----------------------------------------------------
   // open.er-api.com publishes USD-based rates once a day, keyless, and tells
@@ -47,6 +104,7 @@ Panel {
   property bool hasRates: false
   property double ratesUpdatedAt: 0     // unix seconds, from the payload
   property double ratesNextUpdateAt: 0
+  property double lastFetchAt: 0        // unix seconds, this session
   property bool ratesLoading: false
   property bool ratesFailed: false
   property double nowSeconds: Date.now() / 1000
@@ -61,13 +119,17 @@ Panel {
   }
 
   function ratesFresh() {
-    return hasRates && nowSeconds < ratesNextUpdateAt + 600
+    if (!hasRates) return false
+    if (ratesRefresh === "provider") return nowSeconds < ratesNextUpdateAt + 600
+    var hours = parseInt(ratesRefresh, 10) || 24
+    return nowSeconds - Math.max(lastFetchAt, ratesUpdatedAt) < hours * 3600
   }
 
   function refreshRates(force) {
     if (ratesLoading) return
     if (!force && ratesFresh()) return
     ratesLoading = true
+    lastFetchAt = Date.now() / 1000
     fetchProc.running = true
   }
 
@@ -94,11 +156,6 @@ Panel {
   property string draftBeforeHistory: ""
   property string flash: ""
 
-  readonly property var separators: ({
-    decimal: Qt.locale().decimalPoint,
-    group: Qt.locale().groupSeparator === Qt.locale().decimalPoint ? " " : Qt.locale().groupSeparator
-  })
-
   readonly property bool hasValue: !!result && result.value !== undefined
   readonly property string valueText: hasValue ? Model.formatValue(result.value, result.to.cat, separators) : ""
   readonly property string valueUnit: hasValue ? Model.unitLabel(result.to) : ""
@@ -114,22 +171,31 @@ Panel {
     }
     return line
   }
+  readonly property bool showIdleHint: result === null || (result.pending === true && !result.from)
   readonly property string copyText: hasValue ? Model.formatValue(result.value, result.to.cat, { decimal: ".", group: "" }) : ""
 
   function recompute() {
-    result = Model.evaluate(query, { rates: rates, defaultCurrency: defaultCurrency, secondaryCurrency: secondaryCurrency })
+    result = Model.evaluate(query, {
+      rates: rates,
+      defaultCurrency: defaultCurrency,
+      secondaryCurrency: secondaryCurrency,
+      unitSystem: unitSystem,
+      decimal: separators.decimal
+    })
   }
 
   onQueryChanged: recompute()
   onDefaultCurrencyChanged: recompute()
   onSecondaryCurrencyChanged: recompute()
+  onUnitSystemChanged: recompute()
+  onSeparatorsChanged: recompute()
 
   function commit() {
     if (!hasValue) return
     var line = query.trim()
     var next = history.filter(function(h) { return h !== line })
     next.unshift(line)
-    history = next.slice(0, 20)
+    history = next.slice(0, historyLength)
     historyIndex = -1
     if (copyOnEnter) {
       copyProc.command = ["wl-copy", "--", copyText]
@@ -151,10 +217,30 @@ Panel {
     inputField.cursorPosition = inputField.text.length
   }
 
+  // ---- hotkey (read-only; lives in Hyprland's config) ---------------------
+  property string hotkeyLabel: ""
+
+  Process {
+    id: hotkeyProc
+    command: ["bash", "-c",
+      "hyprctl binds -j 2>/dev/null | jq -r --arg id \"$1\" '" +
+      "[.[] | select((.description // \"\") | test(\"Convert\"; \"i\"))] | .[0] | " +
+      "if . == null then \"\" else " +
+      "([(if (.modmask % 128) >= 64 then \"Super\" else empty end)," +
+      "  (if (.modmask % 16) >= 8 then \"Alt\" else empty end)," +
+      "  (if (.modmask % 8) >= 4 then \"Ctrl\" else empty end)," +
+      "  (if (.modmask % 2) >= 1 then \"Shift\" else empty end), (.key | ascii_upcase)] | join(\"+\")) end'",
+      "omarchy-convert", root.moduleName]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.hotkeyLabel = String(text || "").trim()
+    }
+  }
+
   // ---- lifecycle ----------------------------------------------------------
   function focusInput() {
     Qt.callLater(function() {
-      if (!root.opened) return
+      if (!root.opened || root.settingsOpen) return
       inputField.forceActiveFocus()
       inputField.selectAll()
     })
@@ -183,6 +269,7 @@ Panel {
   function close() {
     setCenterHoverRevealSuppressed(false)
     historyIndex = -1
+    settingsOpen = false
     root.controller.hide()
   }
 
@@ -211,7 +298,7 @@ Panel {
     id: fetchProc
     command: ["bash", "-c",
       'set -o pipefail; mkdir -p "$1" || exit 1; ' +
-      'curl -fsS --max-time 10 --max-filesize "$4" -A "omarchy-convert/0.1" -o "$2.tmp" "$3" || { rm -f "$2.tmp"; exit 2; }; ' +
+      'curl -fsS --max-time 10 --max-filesize "$4" -A "omarchy-convert/0.2" -o "$2.tmp" "$3" || { rm -f "$2.tmp"; exit 2; }; ' +
       'jq -e \'.result == "success" and (.rates | type) == "object"\' "$2.tmp" >/dev/null || { rm -f "$2.tmp"; exit 3; }; ' +
       'mv -f "$2.tmp" "$2"',
       "omarchy-convert", root.cacheDir, root.cachePath, root.ratesEndpoint, String(root.ratesMaxBytes)]
@@ -261,7 +348,8 @@ Panel {
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
     function refresh(): void { root.refreshRates(true) }
-    function query(text: string): void { root.openFromHotkey(); inputField.text = String(text || ""); inputField.cursorPosition = inputField.text.length }
+    function settings(): void { root.openFromHotkey(); root.showSettings(true) }
+    function query(text: string): void { root.openFromHotkey(); root.showSettings(false); inputField.text = String(text || ""); inputField.cursorPosition = inputField.text.length }
   }
 
   // ---- UI -----------------------------------------------------------------
@@ -274,17 +362,18 @@ Panel {
     centerOnBar: true
     focusTarget: inputField
     contentWidth: panel.fittedContentWidth(Style.space(460))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight)
+    contentHeight: panel.fittedContentHeight(root.settingsOpen ? settingsColumn.implicitHeight : mainColumn.implicitHeight)
 
+    // ======================= main page =======================
     Column {
-      id: column
+      id: mainColumn
       width: parent.width
       spacing: Style.space(12)
+      visible: !root.settingsOpen
 
-      // Header: title left, rate status right.
       Item {
         width: parent.width
-        height: Math.max(titleText.implicitHeight, statusText.implicitHeight)
+        height: Math.max(titleText.implicitHeight, statusText.implicitHeight, gearButton.implicitHeight)
 
         PanelSectionHeader {
           id: titleText
@@ -295,22 +384,38 @@ Panel {
           fontFamily: root.fontFamily
         }
 
-        Text {
-          id: statusText
+        Row {
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          textFormat: Text.PlainText
-          text: root.flash !== "" ? root.flash : root.ratesStatus
-          color: root.flash !== "" ? root.foreground : (root.ratesFailed || root.ratesStale ? root.urgent : root.faint)
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideLeft
-          width: Math.min(implicitWidth, parent.width - titleText.implicitWidth - Style.space(12))
+          spacing: Style.space(8)
 
-          MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.refreshRates(true)
+          Text {
+            id: statusText
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: root.flash !== "" ? root.flash : root.ratesStatus
+            color: root.flash !== "" ? root.foreground : (root.ratesFailed || root.ratesStale ? root.urgent : root.faint)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideLeft
+            width: Math.min(implicitWidth, mainColumn.width - titleText.implicitWidth - gearButton.width - Style.space(24))
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.refreshRates(true)
+            }
+          }
+
+          PanelActionButton {
+            id: gearButton
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: ""  // nf-fa-cog
+            tooltipText: "Settings"
+            foreground: root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.showSettings(true)
           }
         }
       }
@@ -318,7 +423,7 @@ Panel {
       TextField {
         id: inputField
         width: parent.width
-        placeholderText: "100 EUR in BRL"
+        placeholderText: "100 EUR in " + root.defaultCurrency
         foreground: root.foreground
         accent: Color.accent
         font.family: root.fontFamily
@@ -345,109 +450,475 @@ Panel {
             event.accepted = true
           } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
             root.refreshRates(true); event.accepted = true
+          } else if (event.key === Qt.Key_Comma && (event.modifiers & Qt.ControlModifier)) {
+            root.showSettings(true); event.accepted = true
           }
         }
       }
 
       // Result block. Three states: value, message (error/pending), or the
       // idle hint with examples.
-      Item {
+      Column {
         width: parent.width
-        implicitHeight: resultColumn.implicitHeight
-        height: implicitHeight
+        spacing: Style.space(4)
 
-        Column {
-          id: resultColumn
+        Text {
+          visible: root.hasValue
           width: parent.width
-          spacing: Style.space(4)
+          textFormat: Text.PlainText
+          text: root.sourceText
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.subtitle
+          elide: Text.ElideRight
+        }
+
+        Row {
+          visible: root.hasValue
+          width: parent.width
+          spacing: Style.space(8)
 
           Text {
-            visible: root.hasValue
-            width: parent.width
+            id: valueLabel
             textFormat: Text.PlainText
-            text: root.sourceText
-            color: root.dim
+            text: root.valueText
+            color: root.foreground
             font.family: root.fontFamily
-            font.pixelSize: Style.font.subtitle
+            font.pixelSize: Style.font.displayLarge
+            font.bold: true
+            width: Math.min(implicitWidth, parent.width - unitLabel.implicitWidth - parent.spacing)
             elide: Text.ElideRight
           }
-
-          Row {
-            visible: root.hasValue
-            width: parent.width
-            spacing: Style.space(8)
-
-            Text {
-              id: valueLabel
-              textFormat: Text.PlainText
-              text: root.valueText
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.displayLarge
-              font.bold: true
-              width: Math.min(implicitWidth, parent.width - unitLabel.implicitWidth - parent.spacing)
-              elide: Text.ElideRight
-            }
-            Text {
-              id: unitLabel
-              textFormat: Text.PlainText
-              anchors.baseline: valueLabel.baseline
-              text: root.valueUnit
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.heading
-            }
-          }
-
           Text {
-            visible: !root.hasValue && root.result !== null && root.detailText !== "" && !(root.result.pending === true && !root.result.from)
-            width: parent.width
+            id: unitLabel
             textFormat: Text.PlainText
-            text: root.detailText
-            color: root.result && root.result.error ? root.urgent : root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            wrapMode: Text.Wrap
-          }
-
-          Text {
-            visible: root.result === null || (root.result.pending === true && !root.result.from)
-            width: parent.width
-            textFormat: Text.PlainText
-            text: root.result === null
-              ? "Try  " + Model.EXAMPLES.slice(0, 4).join("   ·   ")
-              : "Add a unit or currency, e.g. “" + Model.formatAmount(root.result.amount, root.separators) + " EUR in " + root.defaultCurrency + "”"
-            color: root.faint
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.Wrap
-          }
-
-          Text {
-            visible: root.hasValue && root.detailText !== ""
-            width: parent.width
-            textFormat: Text.PlainText
-            text: root.detailText
+            anchors.baseline: valueLabel.baseline
+            text: root.valueUnit
             color: root.dim
             font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
+            font.pixelSize: Style.font.heading
           }
+        }
+
+        Text {
+          visible: !root.hasValue && !root.showIdleHint && root.detailText !== ""
+          width: parent.width
+          textFormat: Text.PlainText
+          text: root.detailText
+          color: root.result && root.result.error ? root.urgent : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          wrapMode: Text.Wrap
+        }
+
+        Text {
+          visible: root.showIdleHint
+          width: parent.width
+          textFormat: Text.PlainText
+          text: root.result === null
+            ? "Try  " + Model.EXAMPLES.slice(0, 4).join("   ·   ")
+            : "Add a unit or currency, e.g. “" + Model.formatAmount(root.result.amount, root.separators) + " EUR in " + root.defaultCurrency + "”"
+          color: root.faint
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.Wrap
+        }
+
+        Text {
+          visible: root.hasValue && root.detailText !== ""
+          width: parent.width
+          textFormat: Text.PlainText
+          text: root.detailText
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
         }
       }
 
       PanelSeparator {
         width: parent.width
+        foreground: root.foreground
       }
 
       Text {
         width: parent.width
         textFormat: Text.PlainText
-        text: "↵ copy" + (root.closeOnEnter ? " & close" : "") + "   ·   esc close   ·   ↑↓ history   ·   ^R rates"
+        text: "↵ copy" + (root.closeOnEnter ? " & close" : "") + "   ·   esc close   ·   ↑↓ history   ·   ^R rates   ·   ^, settings"
         color: root.faint
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
+      }
+    }
+
+    // ======================= settings page =======================
+    FocusScope {
+      id: settingsFocus
+      width: parent.width
+      height: settingsColumn.implicitHeight
+      visible: root.settingsOpen
+      focus: root.settingsOpen
+
+      Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Escape) {
+          root.showSettings(false); event.accepted = true
+        }
+      }
+
+      Column {
+        id: settingsColumn
+        width: parent.width
+        spacing: Style.space(14)
+
+        Item {
+          width: parent.width
+          height: Math.max(backButton.implicitHeight, settingsTitle.implicitHeight)
+
+          Row {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(8)
+
+            PanelActionButton {
+              id: backButton
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: ""  // nf-fa-arrow_left
+              tooltipText: "Back"
+              foreground: root.dim
+              hoverColor: root.foreground
+              fontFamily: root.fontFamily
+              onClicked: root.showSettings(false)
+            }
+
+            PanelSectionHeader {
+              id: settingsTitle
+              anchors.verticalCenter: parent.verticalCenter
+              text: "CONVERT SETTINGS"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+          }
+
+          Text {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: "saved to shell.json"
+            color: root.faint
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+
+        // -- currencies
+        Row {
+          width: parent.width
+          spacing: Style.space(12)
+
+          Column {
+            width: (parent.width - parent.spacing) / 2
+            spacing: Style.space(6)
+
+            Text {
+              text: "DEFAULT CURRENCY"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            SearchableDropdown {
+              id: defaultCurrencyPicker
+              width: parent.width
+              showLabel: false
+              placeholderText: "Search code or name…"
+              options: Model.currencyOptions(true)
+              triggerLabel: root.defaultCurrencySetting.toLowerCase() === "auto" ? "System locale (" + root.localeCurrency + ")" : root.defaultCurrency
+              foreground: root.foreground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.fontFamily
+              onChanged: function(value) { root.persistSettings({ defaultCurrency: value }) }
+
+              Binding on value { value: root.defaultCurrencySetting.toLowerCase() === "auto" ? "auto" : root.defaultCurrency }
+            }
+          }
+
+          Column {
+            width: (parent.width - parent.spacing) / 2
+            spacing: Style.space(6)
+
+            Text {
+              text: "SECONDARY CURRENCY"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            SearchableDropdown {
+              id: secondaryCurrencyPicker
+              width: parent.width
+              showLabel: false
+              placeholderText: "Search code or name…"
+              options: Model.currencyOptions(false)
+              triggerLabel: root.secondaryCurrency
+              foreground: root.foreground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.fontFamily
+              onChanged: function(value) { root.persistSettings({ secondaryCurrency: value }) }
+
+              Binding on value { value: root.secondaryCurrency }
+            }
+          }
+        }
+
+        Text {
+          width: parent.width
+          textFormat: Text.PlainText
+          text: "“100 EUR” converts to the default; “100 " + root.defaultCurrency + "” converts to the secondary."
+          color: root.faint
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+
+        // -- unit system + number format
+        Row {
+          width: parent.width
+          spacing: Style.space(12)
+
+          Column {
+            width: (parent.width - parent.spacing) / 2
+            spacing: Style.space(6)
+
+            Text {
+              text: "UNIT SYSTEM"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            Dropdown {
+              id: unitSystemDropdown
+              width: parent.width
+              showLabel: false
+              options: Model.UNIT_SYSTEMS
+              foreground: root.foreground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.fontFamily
+              onChanged: function(value) { root.persistSettings({ unitSystem: value }) }
+
+              Binding on value { value: root.unitSystemSetting }
+            }
+          }
+
+          Column {
+            width: (parent.width - parent.spacing) / 2
+            spacing: Style.space(6)
+
+            Text {
+              text: "NUMBER FORMAT"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            Dropdown {
+              id: numberFormatDropdown
+              width: parent.width
+              showLabel: false
+              options: Model.NUMBER_FORMATS
+              foreground: root.foreground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.fontFamily
+              onChanged: function(value) { root.persistSettings({ numberFormat: value }) }
+
+              Binding on value { value: root.numberFormat }
+            }
+          }
+        }
+
+        Text {
+          width: parent.width
+          textFormat: Text.PlainText
+          text: (root.unitSystemSetting === "auto" ? "Locale " + root.systemLocale.name + " → " + root.unitSystem + ". " : "")
+            + "With " + root.unitSystem + ", “10 nmi” gives " + (root.unitSystem === "metric" ? "km" : "mi")
+            + " and “20 kn” gives " + (root.unitSystem === "metric" ? "km/h" : "mph") + ". Numbers read as "
+            + Model.formatValue(1234.5, "length", root.separators) + "."
+          color: root.faint
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+
+        // -- rates + history
+        Row {
+          width: parent.width
+          spacing: Style.space(12)
+
+          Column {
+            width: (parent.width - parent.spacing) / 2
+            spacing: Style.space(6)
+
+            Text {
+              text: "EXCHANGE-RATE REFRESH"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            Dropdown {
+              id: ratesRefreshDropdown
+              width: parent.width
+              showLabel: false
+              options: Model.RATE_REFRESH
+              foreground: root.foreground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.fontFamily
+              onChanged: function(value) { root.persistSettings({ ratesRefresh: value }) }
+
+              Binding on value { value: root.ratesRefresh }
+            }
+          }
+
+          Column {
+            width: (parent.width - parent.spacing) / 2
+            spacing: Style.space(6)
+
+            Text {
+              text: "HISTORY LENGTH"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            NumberField {
+              width: parent.width
+              fieldWidth: parent.width
+              from: 0
+              to: 100
+              stepSize: 5
+              value: root.historyLength
+              foreground: root.foreground
+              accent: Color.accent
+              fontFamily: root.fontFamily
+              onModified: function(value) { root.persistSettings({ historyLength: value }) }
+            }
+          }
+        }
+
+        PanelSeparator {
+          width: parent.width
+          foreground: root.foreground
+        }
+
+        Toggle {
+          width: parent.width
+          label: "Copy result on Enter"
+          description: "Puts the plain number (dot decimal, no grouping) on the clipboard."
+          checked: root.copyOnEnter
+          foreground: root.foreground
+          accent: Color.accent
+          fontFamily: root.fontFamily
+          onClicked: root.persistSettings({ copyOnEnter: !root.copyOnEnter })
+        }
+
+        Toggle {
+          width: parent.width
+          label: "Close panel on Enter"
+          description: "Turn off to keep converting after copying."
+          checked: root.closeOnEnter
+          foreground: root.foreground
+          accent: Color.accent
+          fontFamily: root.fontFamily
+          onClicked: root.persistSettings({ closeOnEnter: !root.closeOnEnter })
+        }
+
+        PanelSeparator {
+          width: parent.width
+          foreground: root.foreground
+        }
+
+        // -- hotkey (read-only)
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+
+          Row {
+            width: parent.width
+            spacing: Style.space(8)
+
+            Text {
+              text: "KEYBOARD SHORTCUT"
+              anchors.verticalCenter: parent.verticalCenter
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: root.hotkeyLabel !== "" ? root.hotkeyLabel : "not bound"
+              color: root.hotkeyLabel !== "" ? root.foreground : root.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+          }
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: "Shortcuts belong to Hyprland, not to the plugin. Change it in ~/.config/hypr/bindings.lua:"
+            color: root.faint
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.space(8)
+
+            Text {
+              id: bindLine
+              width: parent.width - copyBindButton.width - parent.spacing
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: 'o.bind("SUPER + U", "Convert", "omarchy-shell shell toggle dante.convert")'
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideMiddle
+            }
+
+            Button {
+              id: copyBindButton
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Copy"
+              tooltipText: "Copy the binding line"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              onClicked: {
+                copyProc.command = ["wl-copy", "--", bindLine.text]
+                copyProc.running = true
+              }
+            }
+          }
+        }
       }
     }
   }
