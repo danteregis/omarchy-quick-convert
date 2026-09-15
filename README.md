@@ -3,6 +3,8 @@
 Type a conversion, get the answer. One input box, result updates as you type,
 Enter copies it to the clipboard.
 
+![Convert panel](preview.png)
+
 ```
 100 EUR in BRL        $250 to JPY         100 euros in reais
 10 km to mi           72 F                80 kg
