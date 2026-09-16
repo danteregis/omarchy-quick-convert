@@ -25,7 +25,7 @@ omarchy plugin add https://github.com/danteregis/omarchy-convert.git --enable --
 Then bind a key in `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("SUPER + U", "Convert units and currency", "omarchy-shell shell toggle danteregis.convert")
+o.bind("SUPER + U", "Convert units and currency", "omarchy-shell shell toggle io.github.danteregis.unit-converter")
 ```
 
 Clicking the `⇄` icon in the bar opens the panel too. Right-click refreshes the
@@ -118,7 +118,7 @@ reports imperial units and USD even when it sits in Brazil, so pin the values
 you want:
 
 ```json
-{ "id": "danteregis.convert", "defaultCurrency": "BRL", "secondaryCurrency": "USD", "unitSystem": "metric" }
+{ "id": "io.github.danteregis.unit-converter", "defaultCurrency": "BRL", "secondaryCurrency": "USD", "unitSystem": "metric" }
 ```
 
 The keyboard shortcut is Hyprland's, not the plugin's. The settings page
@@ -128,10 +128,10 @@ shows the current binding and copies the `o.bind` line for
 ## IPC
 
 ```bash
-omarchy-shell shell toggle danteregis.convert
-omarchy-shell danteregis.convert query "100 eur in brl"   # open with a query prefilled
-omarchy-shell danteregis.convert refresh                   # refetch rates
-omarchy-shell danteregis.convert settings                  # open on the settings page
+omarchy-shell shell toggle io.github.danteregis.unit-converter
+omarchy-shell io.github.danteregis.unit-converter query "100 eur in brl"   # open with a query prefilled
+omarchy-shell io.github.danteregis.unit-converter refresh                   # refetch rates
+omarchy-shell io.github.danteregis.unit-converter settings                  # open on the settings page
 ```
 
 ## Development

@@ -5,10 +5,10 @@ import qs.Ui
 // Bar entry for the Convert panel. Mirrors the first-party weather widget:
 // the icon lives here, the panel is loaded from Panel.qml and receives the
 // bar/settings/anchor wiring, and open/close/opened are forwarded so
-// `omarchy-shell shell toggle danteregis.convert` routes here from a keybinding.
+// `omarchy-shell shell toggle io.github.danteregis.unit-converter` routes here from a keybinding.
 BarWidget {
   id: root
-  moduleName: "danteregis.convert"
+  moduleName: "io.github.danteregis.unit-converter"
 
   function injectPanel() {
     var target = panelLoader.item

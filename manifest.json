@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "danteregis.convert",
+  "id": "io.github.danteregis.unit-converter",
   "name": "Convert",
   "version": "0.3.0",
   "author": "Dante Regis",
