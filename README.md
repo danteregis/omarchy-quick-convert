@@ -25,7 +25,7 @@ omarchy plugin add https://github.com/danteregis/omarchy-quick-convert.git --ena
 Then bind a key in `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("SUPER + U", "Convert units and currency", "omarchy-shell shell toggle io.github.danteregis.quick-convert")
+o.bind("SUPER + U", "Quick Convert", "omarchy-shell shell toggle io.github.danteregis.quick-convert")
 ```
 
 Clicking the `⇄` icon in the bar opens the panel too. Right-click refreshes the
@@ -99,9 +99,15 @@ which is keyless and updates once a day. The raw response is cached at
 updates. The header shows the rate age and turns red when rates are more than
 three days old or the last fetch failed.
 
-The fetch runs `curl` with a 10 s timeout and a 64 KiB size cap, `jq` checks
-the document shape before it replaces the cache, and the QML side validates
-every rate again before use.
+The widget checks whether rates are due when the shell starts, every 30
+minutes, and when the panel opens, and only downloads when they are. That is
+the only network access: a keyless HTTPS GET, no data sent.
+
+The fetch runs `curl` over HTTPS only (no redirects to other protocols) with a
+5 s connect and 10 s total timeout, into a private temp file capped at 64 KiB
+while streaming. `jq` checks the document shape before the file atomically
+replaces the cache. The cache is read back with the same size cap, and the QML
+side validates every rate again before use.
 
 ## Settings
 

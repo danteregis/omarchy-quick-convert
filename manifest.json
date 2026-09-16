@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.danteregis.quick-convert",
   "name": "Quick Convert",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "Dante Regis",
   "license": "MIT",
   "description": "Type a conversion or a sum, get the answer. Currencies with live rates, length, mass, volume, temperature, speed, area, data, time, and plain arithmetic.",

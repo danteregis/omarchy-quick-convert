@@ -55,10 +55,13 @@ Panel {
     return v
   }
   readonly property string unitSystemSetting: String(setting("unitSystem", "auto"))
-  readonly property string unitSystem: unitSystemSetting === "auto" ? localeUnitSystem : unitSystemSetting
+  readonly property string unitSystem: unitSystemSetting === "metric" || unitSystemSetting === "imperial" ? unitSystemSetting : localeUnitSystem
   readonly property string numberFormat: String(setting("numberFormat", "auto"))
   readonly property var separators: Model.separatorsFor(numberFormat, localeSeparators)
-  readonly property string ratesRefresh: String(setting("ratesRefresh", "provider"))
+  readonly property string ratesRefresh: {
+    var v = String(setting("ratesRefresh", "provider"))
+    return ["provider", "6", "12", "24"].indexOf(v) === -1 ? "provider" : v
+  }
   readonly property int historyLength: Math.max(0, Math.min(100, parseInt(setting("historyLength", 20), 10) || 0))
   readonly property bool copyOnEnter: setting("copyOnEnter", true) === true
   readonly property bool closeOnEnter: setting("closeOnEnter", true) === true
@@ -97,6 +100,8 @@ Panel {
   // panel works offline and only refetches when that timestamp has passed.
   readonly property string ratesEndpoint: "https://open.er-api.com/v6/latest/USD"
   readonly property int ratesMaxBytes: 65536
+  readonly property int queryMaxLength: 256
+  readonly property int hotkeyMaxBytes: 1048576
   readonly property string cacheDir: Quickshell.env("HOME") + "/.cache/omarchy-convert"
   readonly property string cachePath: cacheDir + "/rates.json"
 
@@ -229,14 +234,15 @@ Panel {
   Process {
     id: hotkeyProc
     command: ["bash", "-c",
-      "hyprctl binds -j 2>/dev/null | jq -r --arg id \"$1\" '" +
-      "[.[] | select((.description // \"\") | test(\"Convert\"; \"i\"))] | .[0] | " +
+      "hyprctl binds -j 2>/dev/null | head -c \"$2\" | jq -r --arg id \"$1\" '" +
+      "([.[] | select((.arg // \"\") | contains($id))] + " +
+      " [.[] | select((.description // \"\") | test(\"^(quick convert|convert units and currency)$\"; \"i\"))]) | .[0] | " +
       "if . == null then \"\" else " +
       "([(if (.modmask % 128) >= 64 then \"Super\" else empty end)," +
       "  (if (.modmask % 16) >= 8 then \"Alt\" else empty end)," +
       "  (if (.modmask % 8) >= 4 then \"Ctrl\" else empty end)," +
       "  (if (.modmask % 2) >= 1 then \"Shift\" else empty end), (.key | ascii_upcase)] | join(\"+\")) end'",
-      "omarchy-convert", root.moduleName]
+      "omarchy-convert", root.moduleName, String(root.hotkeyMaxBytes)]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.hotkeyLabel = String(text || "").trim()
@@ -295,33 +301,46 @@ Panel {
       root.bar.setCenterHoverRevealSuppressed(value)
   }
 
-  Component.onCompleted: ratesFile.reload()
+  Component.onCompleted: ratesFile.running = true
 
   // ---- processes ----------------------------------------------------------
-  // curl writes to a temp file, jq confirms it is a real rates document, and
-  // only then does it replace the cache. Arguments travel as argv, not text.
+  // curl writes to a unique temp file (one fetch per bar instance can race),
+  // capped at ratesMaxBytes while streaming; jq confirms it is a real rates
+  // document, and only then does it atomically replace the cache. Arguments
+  // travel as argv, not text.
   Process {
     id: fetchProc
     command: ["bash", "-c",
-      'set -o pipefail; mkdir -p "$1" || exit 1; ' +
-      'curl -fsS --max-time 10 --max-filesize "$4" -A "omarchy-convert/0.2" -o "$2.tmp" "$3" || { rm -f "$2.tmp"; exit 2; }; ' +
-      'jq -e \'.result == "success" and (.rates | type) == "object"\' "$2.tmp" >/dev/null || { rm -f "$2.tmp"; exit 3; }; ' +
-      'mv -f "$2.tmp" "$2"',
+      'set -o pipefail; umask 077; mkdir -p -m 700 "$1" && [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] || exit 1; ' +
+      'tmp=$(mktemp "$1/rates.XXXXXX") || exit 1; trap \'rm -f "$tmp"\' EXIT; ' +
+      'curl -fsS --proto =https --proto-redir =https --connect-timeout 5 --max-time 10 --max-filesize "$4" -A "omarchy-quick-convert/0.3.1" "$3" | head -c "$(($4 + 1))" > "$tmp" || exit 2; ' +
+      '[ "$(wc -c < "$tmp")" -le "$4" ] || exit 2; ' +
+      'jq -e \'.result == "success" and (.rates | type) == "object"\' "$tmp" >/dev/null || exit 3; ' +
+      'mv -f "$tmp" "$2"',
       "omarchy-convert", root.cacheDir, root.cachePath, root.ratesEndpoint, String(root.ratesMaxBytes)]
     onExited: function(exitCode) {
       root.ratesLoading = false
       root.ratesFailed = exitCode !== 0
-      if (exitCode === 0) ratesFile.reload()
+      if (exitCode === 0) ratesFile.running = true
       else root.recompute()
     }
   }
 
-  FileView {
+  // Reads at most ratesMaxBytes + 1 so an oversized cache file is rejected
+  // without loading it; a missing or non-regular file yields no output.
+  Process {
     id: ratesFile
-    path: root.cachePath
-    printErrors: false
-    onLoaded: root.applyRatesText(text())
-    onLoadFailed: root.refreshRates(true)
+    command: ["bash", "-c",
+      '[ -f "$1" ] && [ ! -L "$1" ] || exit 0; head -c "$2" -- "$1"',
+      "omarchy-convert", root.cachePath, String(root.ratesMaxBytes + 1)]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var raw = String(text || "")
+        if (raw.length === 0) root.refreshRates(true)
+        else root.applyRatesText(raw)
+      }
+    }
   }
 
   Process {
@@ -355,7 +374,7 @@ Panel {
     function toggle(): void { root.toggle() }
     function refresh(): void { root.refreshRates(true) }
     function settings(): void { root.openFromHotkey(); root.showSettings(true) }
-    function query(text: string): void { root.openFromHotkey(); root.showSettings(false); inputField.text = String(text || ""); inputField.cursorPosition = inputField.text.length }
+    function query(text: string): void { root.openFromHotkey(); root.showSettings(false); inputField.text = String(text || "").substring(0, root.queryMaxLength); inputField.cursorPosition = inputField.text.length }
   }
 
   // ---- UI -----------------------------------------------------------------
@@ -436,6 +455,7 @@ Panel {
         font.pixelSize: Style.font.title
         verticalPadding: Style.space(9)
         inputMethodHints: Qt.ImhNoPredictiveText
+        maximumLength: root.queryMaxLength
 
         onTextChanged: {
           if (root.historyIndex !== -1 && text !== root.history[root.historyIndex]) root.historyIndex = -1
@@ -629,6 +649,7 @@ Panel {
 
             Text {
               text: "DEFAULT CURRENCY"
+              textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -658,6 +679,7 @@ Panel {
 
             Text {
               text: "SECONDARY CURRENCY"
+              textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -703,6 +725,7 @@ Panel {
 
             Text {
               text: "UNIT SYSTEM"
+              textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -730,6 +753,7 @@ Panel {
 
             Text {
               text: "NUMBER FORMAT"
+              textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -776,6 +800,7 @@ Panel {
 
             Text {
               text: "EXCHANGE-RATE REFRESH"
+              textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -803,6 +828,7 @@ Panel {
 
             Text {
               text: "HISTORY LENGTH"
+              textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -867,6 +893,7 @@ Panel {
 
             Text {
               text: "KEYBOARD SHORTCUT"
+              textFormat: Text.PlainText
               anchors.verticalCenter: parent.verticalCenter
               color: root.dim
               font.family: root.fontFamily
@@ -904,7 +931,7 @@ Panel {
               width: parent.width - copyBindButton.width - parent.spacing
               anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
-              text: 'o.bind("SUPER + U", "Convert", "omarchy-shell shell toggle io.github.danteregis.quick-convert")'
+              text: 'o.bind("SUPER + U", "Quick Convert", "omarchy-shell shell toggle io.github.danteregis.quick-convert")'
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
