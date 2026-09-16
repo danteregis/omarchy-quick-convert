@@ -5,10 +5,10 @@ import qs.Ui
 // Bar entry for the Convert panel. Mirrors the first-party weather widget:
 // the icon lives here, the panel is loaded from Panel.qml and receives the
 // bar/settings/anchor wiring, and open/close/opened are forwarded so
-// `omarchy-shell shell toggle io.github.danteregis.unit-converter` routes here from a keybinding.
+// `omarchy-shell shell toggle io.github.danteregis.quick-convert` routes here from a keybinding.
 BarWidget {
   id: root
-  moduleName: "io.github.danteregis.unit-converter"
+  moduleName: "io.github.danteregis.quick-convert"
 
   function injectPanel() {
     var target = panelLoader.item
@@ -65,7 +65,7 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: ""  // nf-fa-exchange
-    tooltipText: root.opened ? "" : "Convert"
+    tooltipText: root.opened ? "" : "Quick Convert"
 
     onPressed: function(b) {
       if (!root.bar) return

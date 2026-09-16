@@ -1,4 +1,4 @@
-# Convert — Omarchy bar widget
+# Quick Convert — Omarchy bar widget
 
 Type a conversion or a sum, get the answer. One input box, result updates as
 you type, Enter copies it to the clipboard.
@@ -19,17 +19,26 @@ you type, Enter copies it to the clipboard.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/danteregis/omarchy-convert.git --enable --yes
+omarchy plugin add https://github.com/danteregis/omarchy-quick-convert.git --enable --yes
 ```
 
 Then bind a key in `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("SUPER + U", "Convert units and currency", "omarchy-shell shell toggle io.github.danteregis.unit-converter")
+o.bind("SUPER + U", "Convert units and currency", "omarchy-shell shell toggle io.github.danteregis.quick-convert")
 ```
 
 Clicking the `⇄` icon in the bar opens the panel too. Right-click refreshes the
 exchange rates.
+
+## Remove
+
+```bash
+omarchy plugin remove io.github.danteregis.quick-convert
+rm -rf ~/.cache/omarchy-convert   # optional: cached exchange rates
+```
+
+Then delete the `SUPER + U` line from `~/.config/hypr/bindings.lua` if you added it.
 
 ## What it understands
 
@@ -118,7 +127,7 @@ reports imperial units and USD even when it sits in Brazil, so pin the values
 you want:
 
 ```json
-{ "id": "io.github.danteregis.unit-converter", "defaultCurrency": "BRL", "secondaryCurrency": "USD", "unitSystem": "metric" }
+{ "id": "io.github.danteregis.quick-convert", "defaultCurrency": "BRL", "secondaryCurrency": "USD", "unitSystem": "metric" }
 ```
 
 The keyboard shortcut is Hyprland's, not the plugin's. The settings page
@@ -128,10 +137,10 @@ shows the current binding and copies the `o.bind` line for
 ## IPC
 
 ```bash
-omarchy-shell shell toggle io.github.danteregis.unit-converter
-omarchy-shell io.github.danteregis.unit-converter query "100 eur in brl"   # open with a query prefilled
-omarchy-shell io.github.danteregis.unit-converter refresh                   # refetch rates
-omarchy-shell io.github.danteregis.unit-converter settings                  # open on the settings page
+omarchy-shell shell toggle io.github.danteregis.quick-convert
+omarchy-shell io.github.danteregis.quick-convert query "100 eur in brl"   # open with a query prefilled
+omarchy-shell io.github.danteregis.quick-convert refresh                   # refetch rates
+omarchy-shell io.github.danteregis.quick-convert settings                  # open on the settings page
 ```
 
 ## Development

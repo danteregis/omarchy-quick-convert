@@ -13,8 +13,8 @@ import "Model.js" as Model
 // entry in shell.json.
 Panel {
   id: root
-  moduleName: "io.github.danteregis.unit-converter"
-  ipcTarget: "io.github.danteregis.unit-converter"
+  moduleName: "io.github.danteregis.quick-convert"
+  ipcTarget: "io.github.danteregis.quick-convert"
   manageIpc: false
 
   property var anchorItem: null
@@ -385,7 +385,7 @@ Panel {
           id: titleText
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "CONVERT"
+          text: "QUICK CONVERT"
           foreground: root.foreground
           fontFamily: root.fontFamily
         }
@@ -601,7 +601,7 @@ Panel {
             PanelSectionHeader {
               id: settingsTitle
               anchors.verticalCenter: parent.verticalCenter
-              text: "CONVERT SETTINGS"
+              text: "QUICK CONVERT SETTINGS"
               foreground: root.foreground
               fontFamily: root.fontFamily
             }
@@ -904,7 +904,7 @@ Panel {
               width: parent.width - copyBindButton.width - parent.spacing
               anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
-              text: 'o.bind("SUPER + U", "Convert", "omarchy-shell shell toggle io.github.danteregis.unit-converter")'
+              text: 'o.bind("SUPER + U", "Convert", "omarchy-shell shell toggle io.github.danteregis.quick-convert")'
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.danteregis.unit-converter",
-  "name": "Convert",
+  "id": "io.github.danteregis.quick-convert",
+  "name": "Quick Convert",
   "version": "0.3.0",
   "author": "Dante Regis",
   "license": "MIT",
@@ -14,7 +14,7 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Convert",
+    "displayName": "Quick Convert",
     "description": "A single input box: \"100 EUR in BRL\", \"10 km to mi\", \"3 * 14\", \"(54 * 12) BRL in USD\". Enter copies the result.",
     "category": "Utilities",
     "aliases": [
